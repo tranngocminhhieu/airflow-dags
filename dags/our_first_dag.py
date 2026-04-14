@@ -22,75 +22,54 @@ default_args = {
 def daily_etl_pipeline():
 
     @task
-    def extract_market_data():
-        """
-        Simulate extracting market data for popular companies.
-        This task mimics pulling live stock prices or API data.
-        """
-
-        companies = [
-            "Apple", "Amazon", "Google", "Microsoft",
-            "Tesla", "Netflix", "NVIDIA", "Meta"
-        ]
-
-        # Simulate today's timestamped price data
+    def extract_market_data(market: str):
+        """Simulate extracting market data for a given region or market."""
+        companies = ["Apple", "Amazon", "Google", "Microsoft", "Tesla", "Netflix"]
         records = []
+
         for company in companies:
             price = round(random.uniform(100, 1500), 2)
             change = round(random.uniform(-5, 5), 2)
             records.append({
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'company': company,
-                'price_usd': price,
-                'daily_change_percent': change
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "market": market,
+                "company": company,
+                "price_usd": price,
+                "daily_change_percent": change,
             })
 
         df = pd.DataFrame(records)
-        os.makedirs('/opt/airflow/tmp', exist_ok=True)
-        raw_path = '/opt/airflow/tmp/market_data.csv'
+        os.makedirs("/opt/airflow/tmp", exist_ok=True)
+        raw_path = f"/opt/airflow/tmp/market_data_{market}.csv"
         df.to_csv(raw_path, index=False)
 
-        print(f"[EXTRACT] Market data successfully generated at {raw_path}")
+        print(f"[EXTRACT] Market data for {market} saved at {raw_path}")
         return raw_path
 
     @task
-    def transform_market_data(raw_file:str):
-        """
-        Clean and analyze extracted market data.
-        This task simulates transforming raw stock data
-        to identify the top gainers and losers of the day.
-        """
-
+    def transform_market_data(raw_file: str):
+        """Clean and analyze each regional dataset."""
         df = pd.read_csv(raw_file)
+        df["price_usd"] = pd.to_numeric(df["price_usd"], errors="coerce")
+        df["daily_change_percent"] = pd.to_numeric(
+            df["daily_change_percent"], errors="coerce"
+        )
+        df_sorted = df.sort_values(by="daily_change_percent", ascending=False)
 
-        # Clean: ensure numeric fields are valid
-        df['price_usd'] = pd.to_numeric(df['price_usd'], errors='coerce')
-        df['daily_change_percent'] = pd.to_numeric(df['daily_change_percent'], errors='coerce')
-
-        # Sort companies by daily change (descending = top gainers)
-        df_sorted = df.sort_values(by='daily_change_percent', ascending=False)
-
-        # Select top 3 gainers and bottom 3 losers
         top_gainers = df_sorted.head(3)
         top_losers = df_sorted.tail(3)
 
-        # Save transformed fields
-        os.makedirs('/opt/airflow/tmp', exist_ok=True)
-        gainers_path = '/opt/airflow/tmp/top_gainers.csv'
-        losers_path = '/opt/airflow/tmp/top_losers.csv'
+        transformed_path = raw_file.replace("market_data_", "transformed_")
+        top_gainers.to_csv(transformed_path, index=False)
 
-        top_gainers.to_csv(gainers_path, index=False)
-        top_losers.to_csv(losers_path, index=False)
+        print(f"[TRANSFORM] Transformed data saved at {transformed_path}")
+        return transformed_path
 
-        print(f"[TRANSFORM] Top gainers saved to {gainers_path}")
-        print(f"[TRANSFORM] Top losers saved to {losers_path}")
+    # Define markets to process dynamically
+    markets = ["us", "europe", "asia", "africa"]
 
-        return {
-            'gainers': gainers_path,
-            'losers:': losers_path,
-        }
-
-    raw = extract_market_data()
-    transform_market_data(raw)
+    # Dynamically create parallel tasks
+    raw_files = extract_market_data.expand(market=markets)
+    transform_market_data.expand(raw_file=raw_files)
 
 dag = daily_etl_pipeline()
