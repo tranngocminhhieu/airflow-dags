@@ -1,4 +1,5 @@
 from airflow.decorators import dag, task
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from datetime import datetime, timedelta
 import pandas as pd
 import random
@@ -114,17 +115,15 @@ def daily_etl_pipeline():
         conn.close()
         print(f"[LOAD] Data successfully loaded into MySQL table: {table_name}")
 
-        from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-
-        preview_mysql = SQLExecuteQueryOperator(
-            task_id="preview_mysql_table",
-            conn_id="local_mysql",
-            sql="SELECT * FROM transformed_market_data_us LIMIT 5;",
-            do_xcom_push=True,  # makes query results viewable in Airflow’s XCom tab
-        )
-
     # Define markets to process dynamically
     markets = ["us", "europe", "asia", "africa"]
+
+    preview_mysql = SQLExecuteQueryOperator(
+        task_id="preview_mysql_table",
+        conn_id="local_mysql",
+        sql="SELECT * FROM transformed_market_data_us LIMIT 5;",
+        do_xcom_push=True,  # makes query results viewable in Airflow’s XCom tab
+    )
 
     # Dynamically create and link tasks
     raw_files = extract_market_data.expand(market=markets)
