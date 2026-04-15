@@ -65,11 +65,58 @@ def daily_etl_pipeline():
         print(f"[TRANSFORM] Transformed data saved at {transformed_path}")
         return transformed_path
 
+
+    @task
+    def load_to_mysql(transformed_file: str):
+
+        import mysql.connector
+        import os
+
+        db_config = {
+            "host": "host.docker.internal",
+            "user": "airflow",
+            "password": "airflow",
+            "database": "airflow_db",
+            "port": 3306
+        }
+
+        df = pd.read_csv(transformed_file)
+
+        # Derive the table name dynamically base on region
+        table_name = f"transformed_market_data_{os.path.basename(transformed_file).split('_')[-1].replace('.csv', '')}"
+
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+
+        # Create table if it dose not exist
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                timestamp VARCHAR(50),
+                market VARCHAR(50),
+                company VARCHAR(255),
+                price_usd DECIMAL,
+                daily_change_percent DECIMAL,
+            );
+        ''')
+
+        # Insert records
+        for _, row in df.iterrows():
+            cursor.execute(f'''
+                INSERT INTO {table_name} (timestamp, market, company, price_usd, daily_change_percent)
+                VALUES (%s, %s, %s, %s, %s);
+            ''', tuple(row)
+           )
+
+        conn.commit()
+        conn.close()
+
+
     # Define markets to process dynamically
     markets = ["us", "europe", "asia", "africa"]
 
     # Dynamically create parallel tasks
     raw_files = extract_market_data.expand(market=markets)
-    transform_market_data.expand(raw_file=raw_files)
+    transformed_files = transform_market_data.expand(raw_file=raw_files)
+    load_to_mysql.expand(transformed_file=transformed_files)
 
 dag = daily_etl_pipeline()
