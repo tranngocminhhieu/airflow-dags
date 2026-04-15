@@ -66,14 +66,15 @@ def daily_etl_pipeline():
         return transformed_path
 
 
+
     @task
     def load_to_mysql(transformed_file: str):
-
+        """Load the transformed CSV data into a MySQL table."""
         import mysql.connector
         import os
 
         db_config = {
-            "host": "host.docker.internal",
+            "host": "host.docker.internal",  # enables Docker-to-local communication
             "user": "airflow",
             "password": "airflow",
             "database": "airflow_db",
@@ -82,39 +83,41 @@ def daily_etl_pipeline():
 
         df = pd.read_csv(transformed_file)
 
-        # Derive the table name dynamically base on region
+        # Derive the table name dynamically based on region
         table_name = f"transformed_market_data_{os.path.basename(transformed_file).split('_')[-1].replace('.csv', '')}"
 
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
 
-        # Create table if it dose not exist
-        cursor.execute(f'''
+        # Create table if it doesn’t exist
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 timestamp VARCHAR(50),
                 market VARCHAR(50),
                 company VARCHAR(255),
                 price_usd DECIMAL,
-                daily_change_percent DECIMAL,
+                daily_change_percent DECIMAL
             );
-        ''')
+        """)
 
         # Insert records
         for _, row in df.iterrows():
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 INSERT INTO {table_name} (timestamp, market, company, price_usd, daily_change_percent)
-                VALUES (%s, %s, %s, %s, %s);
-            ''', tuple(row)
-           )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                tuple(row)
+            )
 
         conn.commit()
         conn.close()
-
+        print(f"[LOAD] Data successfully loaded into MySQL table: {table_name}")
 
     # Define markets to process dynamically
     markets = ["us", "europe", "asia", "africa"]
 
-    # Dynamically create parallel tasks
+    # Dynamically create and link tasks
     raw_files = extract_market_data.expand(market=markets)
     transformed_files = transform_market_data.expand(raw_file=raw_files)
     load_to_mysql.expand(transformed_file=transformed_files)
